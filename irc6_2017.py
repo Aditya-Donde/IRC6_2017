@@ -40,6 +40,80 @@ class IRC6_2017:
         dead_load['steel'] = 7.8  # t/m3
         return dead_load
     
+    def cl_204_1_70R_vehicle():
+        # Clause 204.1.1 - 70R Vehicle Load
+        """Returns the axle load configuration for a 70R vehicle as per IRC:6-2017 Clause 204.1.1."""
+        # Axle loads in kN (converted from user input)
+        wheel_load = [80.0, 120.0, 120.0, 170.0, 170.0, 170.0, 170.0]
+
+        # Longitudinal axle positions (user-provided)
+        load_positions_x = [0.0, 3.96, 5.48, 7.61, 8.98, 12.03, 13.4]
+
+        # Transverse wheel coordinates (user-provided)
+        load_positions_z = [-1.19, -0.75, 1.19, 0.75]
+
+        # Create compound load container
+        vehicle_load = og.create_compound_load(name="New_70R")
+
+        # Generate load pattern
+        for z_pos in load_positions_z:
+            for axle_idx, x_pos in enumerate(load_positions_x):
+
+                # Create load vertex
+                load_vert = og.create_load_vertex(
+                    x=x_pos,
+                    z=z_pos,
+                    p=wheel_load[axle_idx]
+                )
+
+                # Create point load
+                point_load = og.create_load(
+                    loadtype="point",
+                    name=f"New_70R_Axle{axle_idx+1}_Pos{z_pos}m",
+                    point1=load_vert
+                )
+
+                # Add to compound load
+                vehicle_load.add(point_load)
+
+        return vehicle_load
     
+    def cl_204_1_class_A_vehicle():
+        # Clause 204.1.1 - 70R Vehicle Load
+        """Returns the axle load configuration for a 70R vehicle as per IRC:6-2017 Clause 204.1.1."""
+        # Axle loads in kN (converted from user input)
+        wheel_load = [80.0, 120.0, 120.0, 170.0, 170.0, 170.0, 170.0]
+
+        # Longitudinal axle positions (user-provided)
+        load_positions_x = [0.0, 3.96, 5.48, 7.61, 8.98, 12.03, 13.4]
+
+        # Transverse wheel coordinates (user-provided)
+        load_positions_z = [-1.19, -0.75, 1.19, 0.75]
+
+        # Create compound load container
+        vehicle_load = og.create_compound_load(name="New_Class_A")
+
+        # Generate load pattern
+        for z_pos in load_positions_z:
+            for axle_idx, x_pos in enumerate(load_positions_x):
+
+                # Create load vertex
+                load_vert = og.create_load_vertex(
+                    x=x_pos,
+                    z=z_pos,
+                    p=wheel_load[axle_idx]
+                )
+
+                # Create point load
+                point_load = og.create_load(
+                    loadtype="point",
+                    name=f"New_Class_A_Axle{axle_idx+1}_Pos{z_pos}m",
+                    point1=load_vert
+                )
+
+                # Add to compound load
+                vehicle_load.add(point_load)
+
+        return vehicle_load
 
     
