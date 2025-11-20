@@ -1,6 +1,7 @@
 import math
 import numpy as np
 from comman import *
+from irc5_2015 import IRC5_2015
 
 
 
@@ -472,12 +473,136 @@ class IRC6_2017:
         # Transverse position of each wheel
         load_positions_z = [-0.840, 0.840]
 
+        if KEY_DESIGN_FATIGUE[2]:
+            fatigue_cycles = 10 * 10**6
+        elif KEY_DESIGN_FATIGUE[1]:
+            fatigue_cycles = 2 * 10 **6
+        elif KEY_TYPE_BRIDGE[1]:
+            fatigue_cycles = 0
+
         # make a dictonary to return vehicle data
         return {
             'x': load_positions_x,
             'z': load_positions_z,
-            'wheel_loads': wheel_loads
+            'wheel_loads': wheel_loads,
+            'fatigue_cycles': fatigue_cycles
+        }
+    
+    @staticmethod
+    def cl_206_1_footway_load():
+        """
+        Returns the footway load in kg/m2 based on the selected footway type
+        as per IRC:6-2017 Clause 206.1.
+        """
+        footway_type = KEY_TYPE_FOOTWAY[0]  # Default footway type
+
+        # Get the load in kg/m2 from the FOOTWAY_LOADS dictionary
+        load_kg_m2 = FOOTWAY_LOADS.get(footway_type, 500)  # default to 500 kg/m2 if not found
+
+        # Convert load to kN/m2
+        # load_kN_m2 = (load_kg_m2 * 9.81) / 1000.0  # kN/m2
+
+        return round(load_kg_m2, 3)
+    
+    @staticmethod
+    def cl_206_2_kerb_load():
+        """
+        Returns the kerb load in kg/m2 based on the kerb width
+        as per IRC:6-2017 Clause 206.2.
+        """
+        if IRC5_2015.cl_109_8_1_road_kerb_outline('road_kerb_width') >= 600:
+            kerb_load_kg_m2 = FOOTWAY_LOADS.get('Default', 500)  # 500 kg/m2
+        
+        return round(kerb_load_kg_m2, 3)
+    
+    @staticmethod
+    def cl_206_5_parapet_load():
+        """
+        Returns the parapet load in kg/m based on the parapet type
+        as per IRC:6-2017 Clause 206.5.
+        """
+        if KEY_PARAPET_TYPE[0] == 'Solid/Partially filled':
+            parapet_load_kg_m2 = 150.0  # kg/m
+        elif KEY_PARAPET_TYPE[0] == 'Frame type':
+            parapet_load_kg_m2 = 150.0  # kg/m
+
+        return round(parapet_load_kg_m2, 3)
+    
+    @staticmethod
+    def table_12(height, bridge_situated_in):
+        """
+        Returns the hourly mean wind speed (Vz) and wind pressure (Pz)
+        from IRC:6-2017 Table 12.
+
+        Parameters:
+            height (float/int): Height in meters (must be one from table)
+            bridge_situated_in (str): "plain" or "obstructed"
+
+        Returns:
+            dict: {"Vz": value_in_mps, "Pz": value_in_N_per_m2}
+        """
+
+        # Table 12 data (hourly mean wind speed Vz in m/s, wind pressure Pz in N/m2)
+        data = {
+            "plain": {
+                "Up to 10": (27.80, 463.70),
+                15: (29.20, 512.50),
+                20: (30.30, 550.60),
+                30: (31.40, 590.20),
+                50: (33.10, 659.20),
+                60: (33.60, 676.30),
+                70: (34.00, 693.60),
+                80: (34.40, 711.20),
+                100: (35.30, 747.00),
+            },
+            "obstructed": {
+                "Up to 10": (17.80, 190.50),
+                15: (19.60, 230.50),
+                20: (21.00, 265.30),
+                30: (22.80, 312.20),
+                50: (24.90, 373.40),
+                60: (25.60, 392.90),
+                70: (26.20, 412.80),
+                80: (26.90, 433.30),
+                100: (28.20, 475.60),
+            }
         }
 
+        # Validate terrain input (accept case-insensitive strings)
+        if not isinstance(bridge_situated_in, str) or bridge_situated_in.lower() not in data:
+            raise ValueError("bridge_situated_in must be 'plain' or 'obstructed'")
+
+        terrain_data = data[bridge_situated_in.lower()]
+
+        # Try to interpret height as numeric where possible
+        try:
+            h = float(height)
+        except Exception:
+            # If not numeric, try direct key lookup (user may pass the string key)
+            if height in terrain_data:
+                vz, pz = terrain_data[height]
+                return {"Vz": vz, "Pz": pz}
+            # Per instruction: ignore undefined values -> return None entries
+            return {"Vz": None, "Pz": None}
+
+        # Handle "Up to 10 m"
+        if h <= 10.0:
+            vz, pz = terrain_data["Up to 10"]
+            return {"Vz": vz, "Pz": pz}
+
+        # Numeric keys in terrain_data are ints; float comparisons with ints are fine
+        if h in terrain_data:
+            vz, pz = terrain_data[h]
+            return {"Vz": vz, "Pz": pz}
+
+        # Try integer match (e.g., 15.0 -> 15)
+        ih = int(h)
+        if ih in terrain_data:
+            vz, pz = terrain_data[ih]
+            return {"Vz": vz, "Pz": pz}
+
+        # Not found: per instruction, ignore undefined values (return None)
+        return {"Vz": None, "Pz": None}
+    
 
 
