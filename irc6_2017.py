@@ -529,23 +529,24 @@ class IRC6_2017:
         return round(parapet_load_kg_m2, 3)
     
     @staticmethod
-    def table_12(height, bridge_situated_in):
+    def table_12(height, basic_wind_speed=33):
         """
-        Returns the hourly mean wind speed (Vz) and wind pressure (Pz)
-        from IRC:6-2017 Table 12.
+        Returns wind speed (Vz) and wind pressure (Pz) according to IRC:6-2017 Table 12,
+        including interpolation and scaling for arbitrary basic wind speed.
 
         Parameters:
-            height (float/int): Height in meters (must be one from table)
-            bridge_situated_in (str): "plain" or "obstructed"
+            height (float): height H in meters
+            terrain (str): "plain" or "obstructed"
+            basic_wind_speed (float): local basic wind speed Vb (m/s)
 
         Returns:
-            dict: {"Vz": value_in_mps, "Pz": value_in_N_per_m2}
+            dict: {"Vz": scaled_hourly_mean_speed, "Pz": scaled_horizontal_pressure}
         """
 
-        # Table 12 data (hourly mean wind speed Vz in m/s, wind pressure Pz in N/m2)
-        data = {
+        # Base table for Vb = 33 m/s
+        table = {
             "plain": {
-                "Up to 10": (27.80, 463.70),
+                10: (27.80, 463.70),
                 15: (29.20, 512.50),
                 20: (30.30, 550.60),
                 30: (31.40, 590.20),
@@ -553,10 +554,10 @@ class IRC6_2017:
                 60: (33.60, 676.30),
                 70: (34.00, 693.60),
                 80: (34.40, 711.20),
-                100: (35.30, 747.00),
+                100: (35.30, 747.00)
             },
             "obstructed": {
-                "Up to 10": (17.80, 190.50),
+                10: (17.80, 190.50),
                 15: (19.60, 230.50),
                 20: (21.00, 265.30),
                 30: (22.80, 312.20),
@@ -564,45 +565,228 @@ class IRC6_2017:
                 60: (25.60, 392.90),
                 70: (26.20, 412.80),
                 80: (26.90, 433.30),
-                100: (28.20, 475.60),
+                100: (28.20, 475.60)
             }
         }
 
-        # Validate terrain input (accept case-insensitive strings)
-        if not isinstance(bridge_situated_in, str) or bridge_situated_in.lower() not in data:
-            raise ValueError("bridge_situated_in must be 'plain' or 'obstructed'")
+        if KEY_TERRAIN_TYPE not in table:
+            raise ValueError("terrain must be 'plain' or 'obstructed'")
 
-        terrain_data = data[bridge_situated_in.lower()]
+        # Extract terrain data
+        terrain_table = table[KEY_TERRAIN_TYPE]
 
-        # Try to interpret height as numeric where possible
-        try:
-            h = float(height)
-        except Exception:
-            # If not numeric, try direct key lookup (user may pass the string key)
-            if height in terrain_data:
-                vz, pz = terrain_data[height]
-                return {"Vz": vz, "Pz": pz}
-            # Per instruction: ignore undefined values -> return None entries
-            return {"Vz": None, "Pz": None}
+        # Clamp height to 10 m minimum as per "Up to 10 m"
+        if height <= 10:
+            Vz_33, Pz_33 = terrain_table[10]
+        else:
+            # Sort heights for interpolation
+            heights = sorted(terrain_table.keys())
 
-        # Handle "Up to 10 m"
-        if h <= 10.0:
-            vz, pz = terrain_data["Up to 10"]
-            return {"Vz": vz, "Pz": pz}
+            # If exact match exists
+            if height in heights:
+                Vz_33, Pz_33 = terrain_table[height]
+            else:
+                # Find bounding heights
+                lower = max(h for h in heights if h < height)
+                upper = min(h for h in heights if h > height)
 
-        # Numeric keys in terrain_data are ints; float comparisons with ints are fine
-        if h in terrain_data:
-            vz, pz = terrain_data[h]
-            return {"Vz": vz, "Pz": pz}
+                # Linear interpolation
+                V_low, P_low = terrain_table[lower]
+                V_high, P_high = terrain_table[upper]
+                ratio = (height - lower) / (upper - lower)
 
-        # Try integer match (e.g., 15.0 -> 15)
-        ih = int(h)
-        if ih in terrain_data:
-            vz, pz = terrain_data[ih]
-            return {"Vz": vz, "Pz": pz}
+                Vz_33 = V_low + ratio * (V_high - V_low)
+                Pz_33 = P_low + ratio * (P_high - P_low)
 
-        # Not found: per instruction, ignore undefined values (return None)
-        return {"Vz": None, "Pz": None}
+        # Apply scaling rules
+        Vb = basic_wind_speed
+
+        # (2) Wind speed scale: Vz ∝ Vb / 33
+        Vz_scaled = Vz_33 * (Vb / 33)
+
+        # (3) Wind pressure scale: Pz ∝ (Vb / 33)^2
+        Pz_scaled = Pz_33 * (Vb / 33)**2
+
+        return {"Vz": Vz_scaled, "Pz": Pz_scaled}
+
+    @staticmethod
+    def cl_206_3_3_transverse_wind_load(span):
+        """
+        Computes transverse wind force as per IRC:6-2017 Clause 209.3.3.
+
+        Parameters:
+            span (float): span in meters
+            railing_height, crash_barrier_height, deck_thickness, openings_in_railing (float): dimensions in m
+            height_for_pz (float): height at which Pz is evaluated (Table 12)
+            terrain (str): "plain" or "obstructed"
+            basic_wind_speed (float): V_b
+            girder_section (str): "plate" or "rolled"
+            number_of_girders (int)
+            c_spacing (float): centre-to-centre spacing for plate girders (n ≥ 2)
+            b_width, d_depth (float): width & depth for rolled beams (for CD)
+
+        Returns:
+            dict: {"A1":..., "Pz":..., "G":..., "CD":..., "FT":...}
+        """
+        # -----------------------------
+        # 1. Compute A1 (solid exposed area)
+        # -----------------------------
+        exposed_height = railing_height + crash_barrier_height + deck_thickness - openings_in_railing
+        if exposed_height < 0:
+            exposed_height = 0
+
+        
+        # -----------------------------
+        # 2. Compute Pz using Table 12 scaling
+        # -----------------------------
+        Pz = IRC6_2017.table_12(height_for_pz, terrain, basic_wind_speed)["Pz"]
+
+        A1 = exposed_height   # m2 per metre length of bridge
+
+        # -----------------------------
+        # 3. Gust factor G (IRC:6 says G = 2 for spans ≤150m)
+        # -----------------------------
+        G = 2.0
+
+        # -----------------------------
+        # 4. Compute Drag Coefficient CD
+        # -----------------------------
+        girder_section = girder_section.lower()
+        # Case 1: Plate girder, single girder
+        if girder_section == "plate" and number_of_girders == 1:
+            CD = 2.2
+
+        # Case 2: Plate girder, 2 or more girders
+        elif girder_section == "plate" and number_of_girders >= 2:
+            if c_spacing is None or d_depth is None:
+                raise ValueError("For plate girders with n>=2, c_spacing and d_depth must be provided.")
+            ratio = c_spacing / (20 * d_depth)
+            if ratio < 4:
+                CD = 2 * (1 + ratio)
+            else:
+                CD = 2 * (1 + 4)  # upper bound
+
+        # Case 3: Rolled beam, single girder
+        elif girder_section == "rolled" and number_of_girders == 1:
+            if b_width is None or d_depth is None:
+                raise ValueError("For rolled beam girder, b_width and d_depth must be provided.")
+            bd_ratio = b_width / d_depth
+
+            if abs(bd_ratio - 2) < 1e-6:
+                CD = 1.5
+            elif bd_ratio >= 6:
+                CD = 1.3
+            else:
+                # interpolate between 1.5 at b/d=2 and 1.3 at b/d=6
+                CD = 1.5 + (bd_ratio - 2) * (1.3 - 1.5) / (6 - 2)
+
+        # Case 4: Rolled beam, multiple girders
+        elif girder_section == "rolled" and number_of_girders >= 2:
+            if c_spacing is None or d_depth is None:
+                raise ValueError("For multiple rolled beams, c_spacing and d_depth must be provided.")
+            bd_ratio = c_spacing / d_depth
+
+            # Condition: ratio of clear distance to depth ≤ 7
+            if bd_ratio <= 7:
+                # CD = 1.5 × (CD_single_beam)
+                # CD_single_beam depends on b/d ratio of single beam
+                if b_width is None:
+                    raise ValueError("b_width must also be provided for multi-rolled girder case.")
+
+                bd_single = b_width / d_depth
+                if abs(bd_single - 2) < 1e-6:
+                    CD_single = 1.5
+                elif bd_single >= 6:
+                    CD_single = 1.3
+                else:
+                    CD_single = 1.5 + (bd_single - 2) * (1.3 - 1.5) / (6 - 2)
+
+                CD = 1.5 * CD_single
+            else:
+                raise ValueError("c/d ratio exceeds 7 → IRC does not define CD beyond this limit.")
+
+        else:
+            raise ValueError("Invalid girder section input.")
+
+        # -----------------------------
+        # 5. Final transverse wind force
+        # -----------------------------
+        FT = Pz * A1 * G * CD
+        
+        # Todo, check this clause also add Wind force eccentricity below slab top
+        return {
+            "A1": A1,
+            "Pz": Pz,
+            "G": G,
+            "CD": CD,
+            "FT": FT
+        }
     
+    @staticmethod
+    def cl_209_3_4_logitudinal_force():
+        """
+        Computes longitudinal wind force as per IRC:6-2017 Clause 209.3.4.
+        Returns:
+            float: Longitudinal wind force FL in kN (rounded to 3 decimal places)
+        """
+        FL = 0.25 * IRC6_2017.cl_206_3_3_transverse_wind_load()['FT']
+        return round(FL, 3)
+    
+    @staticmethod
+    def cl_209_3_5_vertical_force(carriageway_width, footpath_width, span):
+        """
+        Computes vertical wind force as per IRC:6-2017 Clause 209.3.5.
+        Returns:
+            float: Vertical wind force FV in kN (rounded to 3 decimal places)
+        """
+        G = IRC6_2017.cl_206_3_3_transverse_wind_load()['G']
+        Pz = IRC6_2017.cl_206_3_3_transverse_wind_load()['Pz']
 
+        A3 = span * (carriageway_width + footpath_width)
+        CL = 0.75  # Lift coefficient for flat plate
 
+        FV = Pz * A3 * G * CL
+        return round(FV, 3)
+    
+    @staticmethod
+    def cl_209_3_6_transverse_wind_load_per_unit(railing_height, crash_barrier_height):
+        """
+        Computes transverse wind load per unit length as per IRC:6-2017 Clause 209.3.6.
+        Returns:
+            float: Transverse wind load per unit length FTL in kN/m (rounded to 3 decimal places)
+        """
+        
+        G = IRC6_2017.cl_206_3_3_transverse_wind_load()['G']
+        Pz = IRC6_2017.cl_206_3_3_transverse_wind_load()['Pz']
+        CD = 1.2  # Drag coefficient for parapet
+        
+        # Determine if railing or crash barrier is present
+        if KEY_RAILING_TYPE[0] or KEY_CRASH_BARRIER_TYPE[0]:
+            railing_present = True
+        else:
+            railing_present = False
+
+        if railing_present: 
+            A1 = 3.0 - railing_height   # Area exposed to wind per unit length (m2/m)
+        else:
+            A1 = 3.0 - crash_barrier_height
+        
+        # Final transverse wind load per unit length
+        FT_LL = Pz * A1 * G * CD
+        return round(FT_LL, 3)
+    
+    @staticmethod
+    def cl_209_3_7(wind_speed):
+        """
+        The bridges shall not be considered to be carrying any live load when the wind 
+        speed at deck level exceeds 36 m/s as per IRC:6-2017 Clause 209.3.7.
+
+        """
+        if wind_speed <= 36.0:
+            live_load_considered = True
+        else:
+            live_load_considered = False
+        
+        # Todo, add this clause to load combinations
+        
+        return live_load_considered
