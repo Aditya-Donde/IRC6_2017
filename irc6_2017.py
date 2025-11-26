@@ -529,6 +529,64 @@ class IRC6_2017:
         return round(parapet_load_kg_m2, 3)
     
     @staticmethod
+    def cl_208_2_impact_factor(span):
+        """
+        Returns the impact factor (IM) for Class A or Class B loading 
+        according to IRC:6-2017 Clause 208.2.
+
+        Parameters:
+            span (float): span in metres
+
+        Returns:
+            float: impact factor (IM)
+        """
+        if span < 3.0: #span less than 3 m
+            span = 3.0
+            IM = 9.0/(13.5 + span)
+        elif 3.0 <= span <= 45.0: #span between 3 m and 45 m
+            IM = 9.0/(13.5 + span)
+        else: #span greater than 45 m
+            span = 45.0
+            IM = 9.0/(13.5 + span)
+
+        return round(IM, 3)
+    
+    @staticmethod
+    def cl_208_3_impact_factor(span):
+        """
+        Returns the impact factor (IM) for Class 70R loading 
+        according to IRC:6-2017 Clause 208.3.
+
+        Parameters:
+            span (float): span in metres
+        Returns:
+            float: impact factor (IM)
+        """
+        if span < 9.0: #span less than 9 m
+            if KEY_VEHICLE[1]: # Class70R(T)
+                if span < 5.0:
+                    IM = 0.25
+                if span >= 5.0:
+                    IM = 0.10
+            elif KEY_VEHICLE[0]: # Class70R(W)
+                IM = 0.25
+        
+        elif 9.0 <= span <= 45.0: #span between 9 m and 45 m
+            if KEY_VEHICLE[1]: # Class70R(T)
+                IM = 0.10
+            elif KEY_VEHICLE[0]: # Class70R(W)
+                if span < 23.0:
+                    IM = 0.25
+                if span >= 23.0:
+                    IM = 9.0/(13.5 + span)
+        else: #span greater than 45 m
+            span = 45.0
+            IM = 9.0/(13.5 + span)
+        
+        return round(IM, 3)
+            
+    
+    @staticmethod
     def table_12(height, basic_wind_speed=33):
         """
         Returns wind speed (Vz) and wind pressure (Pz) according to IRC:6-2017 Table 12,
