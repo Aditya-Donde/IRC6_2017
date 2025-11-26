@@ -203,25 +203,25 @@ class IRC6_2017:
         # Determine the number of lanes for design purposes based on ranges
         # Assign to variable `lanes` (so other functions can use it)
         if carriageway_width < 5.3:
-            lanes = 1
+            design_lanes = 1
         elif carriageway_width < 9.6:
-            lanes = 2
+            design_lanes = 2
         elif carriageway_width < 13.1:
-            lanes = 3
+            design_lanes = 3
         elif carriageway_width < 16.6:
-            lanes = 4
+            design_lanes = 4
         elif carriageway_width < 20.1:
-            lanes = 5
+            design_lanes = 5
         elif carriageway_width < 23.6:
-            lanes = 6
+            design_lanes = 6
         else:
             # For widths >= 23.6m, extrapolate using the same pattern
             # Each additional ~3.5 m adds one lane (approximate rule)
             additional_width = carriageway_width - 20.1
             additional_lanes = math.ceil(additional_width / 3.5)
-            lanes = 6 + additional_lanes
+            design_lanes = 6 + additional_lanes
 
-        return lanes
+        return int(design_lanes)
 
     @staticmethod
     def table_6A(carriageway_width, design_lanes=None, g_increment=0.0, span=1.0, vehicle=None):
@@ -752,6 +752,9 @@ class IRC6_2017:
     def cl_209_3_6_transverse_wind_load_per_unit(railing_height, crash_barrier_height):
         """
         Computes transverse wind load per unit length as per IRC:6-2017 Clause 209.3.6.
+        Args:
+            railing_height (float): height of railing in metres
+            crash_barrier_height (float): height of crash barrier in metres
         Returns:
             float: Transverse wind load per unit length FTL in kN/m (rounded to 3 decimal places)
         """
@@ -780,7 +783,10 @@ class IRC6_2017:
         """
         The bridges shall not be considered to be carrying any live load when the wind 
         speed at deck level exceeds 36 m/s as per IRC:6-2017 Clause 209.3.7.
-
+        args:
+            wind_speed (float): wind speed at deck level in m/s
+        Returns:
+            bool: True if live load is to be considered, False otherwise
         """
         if wind_speed <= 36.0:
             live_load_considered = True
@@ -790,3 +796,65 @@ class IRC6_2017:
         # Todo, add this clause to load combinations
         
         return live_load_considered
+    
+    @staticmethod
+    def cl_211_2_braking_force(design_lanes):
+        """
+        Returns braking force as per IRC:6-2017 Clause 211.2.
+        Returns:
+            float: Braking force in kN (rounded to 3 decimal places)
+        """
+        for lane in range(1, design_lanes + 1):
+            if lane == 1 or lane == 2:
+                wheel_load = IRC6_2017.cl_204_1_ClassA_vehicle()['wheel_loads']
+                braking_force_1 = 0.20 * sum(wheel_load)  # kN
+            if lane > 2:
+                wheel_load = IRC6_2017.cl_204_1_Class70R_vehicle()['wheel_loads']
+                braking_force_2 = 0.05 * sum(wheel_load)  # kN
+            
+            total_braking_force = braking_force_1 + braking_force_2
+        return round(total_braking_force, 3)
+    
+    @staticmethod
+    def cl_211_3_braking_force_location():
+
+        return
+    
+    
+    @staticmethod
+    def table_15():
+        """
+        Returns bridge temperature as per IRC:6-2017 Table 15.
+        Returns:
+            float: Bridge temperature in °C (rounded to 3 decimal places)
+        """
+        max_temp = None  # °C
+        min_temp = None  # °C
+        delta_temp = max_temp - min_temp  # °C
+        if delta_temp > 20.0:
+            bridge_temp = ((max_temp + min_temp) / 2.0) + 10.0 # °C
+        elif delta_temp < 20.0:
+            bridge_temp = ((max_temp + min_temp) / 2.0) + 5.0  # °C 
+        return round(bridge_temp, 3)
+    
+    @staticmethod
+    def cl_215_4_material_properties():
+        
+        thermal_expansion_coefficient = 12 * 1.0e-6  # per °C
+
+        
+
+    @staticmethod
+    def table_16():
+        """
+        Returns dictionary of zone factors as per IRC:6-2017 Table 16.
+        Returns:
+            dict: zone factors {'Seismic Zone': factor}
+        """
+        zone_factors = {
+            'Zone II': 0.10,
+            'Zone III': 0.16,
+            'Zone IV': 0.24,
+            'Zone V': 0.36
+        }
+        return zone_factors
